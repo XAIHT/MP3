@@ -1,5 +1,7 @@
 #include "mp3_decoder.h"
 
+#include <string.h>
+
 /*
  * Decoder scaffold contract
  * -------------------------
@@ -19,7 +21,8 @@
  */
 
 #define MP3_SCAFFOLD_TOTAL_FRAMES 96000u
-#define MP3_SCAFFOLD_CHUNK_FRAMES 128u
+#define MP3_SCAFFOLD_CHUNK_FRAMES 1152u
+#define MP3_SCAFFOLD_SIMULATED_FRAME_BYTES 144u
 
 static int16_t g_mp3_scaffold_pcm[MP3_SCAFFOLD_CHUNK_FRAMES * MP3_DECODER_OUTPUT_CHANNELS];
 
@@ -90,38 +93,79 @@ static void mp3_scaffold_generate(int16_t *dst, uint32_t startFrame, uint32_t fr
     }
 }
 
-void MP3_ByteSource_Init(MP3_ByteSource *source, const uint8_t *data, size_t size)
+static size_t mp3_decoder_refill_input(MP3_Decoder *decoder)
+{
+    if (decoder == NULL || decoder->source.read == NULL)
+    {
+        return 0u;
+    }
+
+    size_t freeBytes = sizeof(decoder->inputCache) - decoder->cachedBytes;
+    if (freeBytes == 0u)
+    {
+        return 0u;
+    }
+
+    size_t readCount = decoder->source.read(decoder->source.context,
+                                            &decoder->inputCache[decoder->cachedBytes],
+                                            freeBytes);
+    decoder->cachedBytes += readCount;
+    return readCount;
+}
+
+void MP3_ByteSource_Init(MP3_ByteSource *source,
+                         MP3_ByteSource_ReadFn readFn,
+                         MP3_ByteSource_RewindFn rewindFn,
+                         void *context)
 {
     if (source == NULL)
     {
         return;
     }
 
-    source->data = data;
-    source->size = size;
-    source->offset = 0u;
+    source->read = readFn;
+    source->rewind = rewindFn;
+    source->context = context;
 }
 
-void MP3_Decoder_Init(MP3_Decoder *decoder, const MP3_ByteSource *source)
+void MP3_Decoder_GetDefaultConfig(MP3_DecoderConfig *config)
+{
+    if (config == NULL)
+    {
+        return;
+    }
+
+    config->outputSampleRate = MP3_DECODER_OUTPUT_SAMPLE_RATE;
+    config->outputChannels = MP3_DECODER_OUTPUT_CHANNELS;
+    config->outputBitsPerSample = MP3_DECODER_OUTPUT_BITS;
+}
+
+void MP3_Decoder_Init(MP3_Decoder *decoder,
+                      const MP3_ByteSource *source,
+                      const MP3_DecoderConfig *config)
 {
     if (decoder == NULL)
     {
         return;
     }
 
+    memset(decoder, 0, sizeof(*decoder));
+
     if (source != NULL)
     {
         decoder->source = *source;
     }
+
+    if (config != NULL)
+    {
+        decoder->config = *config;
+    }
     else
     {
-        MP3_ByteSource_Init(&decoder->source, NULL, 0u);
+        MP3_Decoder_GetDefaultConfig(&decoder->config);
     }
 
     decoder->initialized = 1u;
-    decoder->streamEnded = 0u;
-    decoder->totalFramesProduced = 0u;
-    decoder->nextFrameIndex = 0u;
 }
 
 void MP3_Decoder_Reset(MP3_Decoder *decoder)
@@ -131,10 +175,19 @@ void MP3_Decoder_Reset(MP3_Decoder *decoder)
         return;
     }
 
-    decoder->source.offset = 0u;
+    decoder->cachedBytes = 0u;
+    decoder->streamOffset = 0u;
     decoder->streamEnded = 0u;
     decoder->totalFramesProduced = 0u;
     decoder->nextFrameIndex = 0u;
+
+    if (decoder->source.rewind != NULL)
+    {
+        if (decoder->source.rewind(decoder->source.context) != 0)
+        {
+            decoder->streamEnded = 1u;
+        }
+    }
 }
 
 MP3_DecodeStatus MP3_Decoder_DecodeFrame(MP3_Decoder *decoder, MP3_DecodeResult *result)
@@ -144,13 +197,11 @@ MP3_DecodeStatus MP3_Decoder_DecodeFrame(MP3_Decoder *decoder, MP3_DecodeResult 
         return MP3_DECODER_STATUS_ERROR;
     }
 
-    result->samples = NULL;
-    result->frameCount = 0u;
-    result->sampleRate = MP3_DECODER_OUTPUT_SAMPLE_RATE;
-    result->channels = MP3_DECODER_OUTPUT_CHANNELS;
-    result->bitsPerSample = MP3_DECODER_OUTPUT_BITS;
+    memset(result, 0, sizeof(*result));
+    result->sampleRate = decoder->config.outputSampleRate;
+    result->channels = decoder->config.outputChannels;
+    result->bitsPerSample = decoder->config.outputBitsPerSample;
     result->status = MP3_DECODER_STATUS_ERROR;
-    result->bytesConsumed = 0u;
 
     if (decoder->streamEnded != 0u)
     {
@@ -158,7 +209,29 @@ MP3_DecodeStatus MP3_Decoder_DecodeFrame(MP3_Decoder *decoder, MP3_DecodeResult 
         return result->status;
     }
 
-    if (decoder->source.data == NULL || decoder->source.size == 0u)
+    if (decoder->source.read == NULL)
+    {
+        result->status = MP3_DECODER_STATUS_NEED_MORE_INPUT;
+        return result->status;
+    }
+
+    while (decoder->cachedBytes < MP3_SCAFFOLD_SIMULATED_FRAME_BYTES)
+    {
+        size_t pulled = mp3_decoder_refill_input(decoder);
+        if (pulled == 0u)
+        {
+            break;
+        }
+    }
+
+    if (decoder->cachedBytes == 0u)
+    {
+        decoder->streamEnded = 1u;
+        result->status = MP3_DECODER_STATUS_STREAM_END;
+        return result->status;
+    }
+
+    if (decoder->cachedBytes < MP3_SCAFFOLD_SIMULATED_FRAME_BYTES && decoder->totalFramesProduced == 0u)
     {
         result->status = MP3_DECODER_STATUS_NEED_MORE_INPUT;
         return result->status;
@@ -178,15 +251,21 @@ MP3_DecodeStatus MP3_Decoder_DecodeFrame(MP3_Decoder *decoder, MP3_DecodeResult 
         return result->status;
     }
 
-    mp3_scaffold_generate(g_mp3_scaffold_pcm, decoder->nextFrameIndex, framesThisChunk);
+    mp3_scaffold_generate(result->pcm, decoder->nextFrameIndex, framesThisChunk);
 
-    size_t bytesRemaining = decoder->source.size - decoder->source.offset;
-    size_t simulatedConsumption = bytesRemaining;
-    if (simulatedConsumption > 64u)
+    size_t consumed = decoder->cachedBytes;
+    if (consumed > MP3_SCAFFOLD_SIMULATED_FRAME_BYTES)
     {
-        simulatedConsumption = 64u;
+        consumed = MP3_SCAFFOLD_SIMULATED_FRAME_BYTES;
     }
-    decoder->source.offset += simulatedConsumption;
+    if (consumed < decoder->cachedBytes)
+    {
+        memmove(decoder->inputCache,
+                &decoder->inputCache[consumed],
+                decoder->cachedBytes - consumed);
+    }
+    decoder->cachedBytes -= consumed;
+    decoder->streamOffset += consumed;
 
     decoder->nextFrameIndex += framesThisChunk;
     decoder->totalFramesProduced += framesThisChunk;
@@ -195,9 +274,8 @@ MP3_DecodeStatus MP3_Decoder_DecodeFrame(MP3_Decoder *decoder, MP3_DecodeResult 
         decoder->streamEnded = 1u;
     }
 
-    result->samples = g_mp3_scaffold_pcm;
     result->frameCount = framesThisChunk;
-    result->bytesConsumed = simulatedConsumption;
+    result->bytesConsumed = consumed;
     result->status = (decoder->streamEnded != 0u) ? MP3_DECODER_STATUS_STREAM_END : MP3_DECODER_STATUS_OK;
 
     return result->status;

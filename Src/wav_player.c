@@ -109,7 +109,12 @@ static int WAV_Player_FillDmaHalf(uint16_t *dst)
 	{
 		memset(g_dmaPcmScratch, 0, frames * 2u * sizeof(int16_t));
 		if (g_dmaState.clip->generator(g_dmaPcmScratch, frames, g_dmaState.clip->user) != 0)
+		{
+			memset(dst, 0, DMA_HALF_WORDS * sizeof(uint16_t));
+			g_dmaState.framesRemaining = 0u;
+			g_dmaState.done = 1u;
 			return -31;
+		}
 		WAV_Player_PackPcmToI2S(g_dmaPcmScratch, dst, frames);
 		g_dmaState.framesRemaining -= frames;
 	}

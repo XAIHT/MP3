@@ -1,6 +1,6 @@
 # MP3 project audio proof-of-concept
 
-This project now plays a short **embedded 2-second audio clip** from flash through the onboard **CS43L22** codec and the audio jack.
+This project now plays audio through the onboard **CS43L22** codec and the audio jack using a **DMA-backed PCM output path** plus a stronger **MP3 decoder scaffold**.
 
 ## What it does now
 
@@ -12,15 +12,15 @@ This project now plays a short **embedded 2-second audio clip** from flash throu
 
 ## Important note
 
-This is **not true MP3 decoding yet**.
+This is still **not true MP3 decoding yet**.
 
-The project now contains a **real integration scaffold** for future MP3 support:
+What is real now is the integration shape:
 
-- byte source abstraction (`flash` today, `SD/USB` later)
-- decoder abstraction (`stub` today, real decoder later)
-- player bridge that converts decoded PCM chunks into the existing DMA audio path
+- **byte source layer**: pull compressed bytes from flash today, SD/USB later
+- **decoder layer**: consume source bytes and emit PCM chunks
+- **output/player layer**: feed decoded PCM into the existing DMA audio transport
 
-Right now the decoder scaffold outputs generated PCM while preserving the control flow you’ll need for a real MP3 library.
+That means later you should only need to replace the byte-source implementation and/or the decoder internals, not the DMA transport or `main.c` flow.
 
 ## Main files
 
@@ -28,11 +28,11 @@ Right now the decoder scaffold outputs generated PCM while preserving the contro
 - `Src/wav_player.c` - DMA PCM streaming to I2S
 - `Inc/wav_player.h` - playback API and embedded clip descriptor
 - `Src/wav_data.c` - embedded fallback clip generator
-- `Inc/mp3_decoder.h` - MP3 decoder and byte-source contract
-- `Src/mp3_decoder.c` - placeholder decoder implementation with decode-result flow
+- `Inc/mp3_decoder.h` - MP3 byte-source, config, decode-result, and decoder contract
+- `Src/mp3_decoder.c` - placeholder decoder implementation using the real source-fed control flow
 - `Inc/mp3_player.h` - MP3 player bridge API
-- `Src/mp3_player.c` - adapts decoder output into the DMA audio path
-- `Inc/mp3_data.h` / `Src/mp3_data.c` - stub MP3 byte container in flash
+- `Src/mp3_player.c` - adapts decoder output into the DMA playback path
+- `Inc/mp3_data.h` / `Src/mp3_data.c` - in-memory source helper and stub MP3 bytes
 
 ## Current playback contract
 
@@ -41,37 +41,87 @@ Right now the decoder scaffold outputs generated PCM while preserving the contro
 - Sample format: `16-bit PCM`
 - Transport: DMA double-buffer playback over I2S to the codec
 
+## Current MP3 scaffold contract
+
+### Byte source layer
+
+Defined in `Inc/mp3_decoder.h`:
+
+- `MP3_ByteSource_ReadFn`
+- `MP3_ByteSource_RewindFn`
+- `MP3_ByteSource`
+
+The source contract is pull-based:
+
+- `read(context, dst, maxBytes)` copies compressed bytes into `dst`
+- `rewind(context)` resets the source back to the start when looping
+
+Provided today in `Inc/mp3_data.h` / `Src/mp3_data.c`:
+
+- `MP3_MemorySourceContext`
+- `MP3_Data_InitMemorySource(...)`
+- `MP3_Data_BuildMemoryByteSource(...)`
+
+This is the clean swap point for:
+
+- flash-backed MP3 bytes
+- SD file reader
+- USB MSC file reader
+
+### Decoder layer
+
+Defined in `Inc/mp3_decoder.h`:
+
+- `MP3_DecoderConfig`
+- `MP3_DecodeResult`
+- `MP3_Decoder`
+- `MP3_Decoder_Init(...)`
+- `MP3_Decoder_Reset(...)`
+- `MP3_Decoder_DecodeFrame(...)`
+
+Today the decoder still synthesizes PCM, but it now does it through a source-fed input cache and returns decoded PCM in a reusable result object. That is the same control shape a real decoder library would use.
+
+### Player/output bridge
+
+Defined in `Inc/mp3_player.h`:
+
+- `MP3_Player_InitFromMemory(...)`
+- `MP3_Player_InitFromByteSource(...)`
+- `MP3_Player_StartDMA(...)`
+- `MP3_Player_Reset(...)`
+- `MP3_Player_IsReady(...)`
+- `MP3_Player_IsFinished(...)`
+
+`Src/mp3_player.c` adapts the decoder output into the existing `wav_player` DMA path.
+
 ## How to swap in a real MP3 decoder later
 
-### 1) Replace the byte source
+### Option 1: keep flash-backed MP3
 
-Today:
-- `MP3_Player_InitFromMemory(&ctx, MP3_Data_GetStubBytes(), MP3_Data_GetStubSize())`
+- replace the bytes behind `MP3_Data_GetStubBytes()` / `MP3_Data_GetStubSize()`
+- keep using `MP3_Player_InitFromMemory(...)`
 
-Later options:
-- flash-backed MP3 bytes
-- SD-backed file reader
-- USB MSC-backed file reader
+### Option 2: move to SD-backed MP3
 
-The byte source contract lives in `Inc/mp3_decoder.h` as `MP3_ByteSource`.
+- create an SD source context struct
+- implement `read` and `rewind` callbacks matching `MP3_ByteSource`
+- call `MP3_Player_InitFromByteSource(...)`
 
-### 2) Replace the decoder internals
+### Option 3: drop in a real decoder library
 
 Update `Src/mp3_decoder.c` so `MP3_Decoder_DecodeFrame(...)`:
-- parses real MP3 frames
-- decodes them to PCM
-- fills `MP3_DecodeResult`
-- advances `bytesConsumed`
-- returns `MP3_DECODER_STATUS_OK`, `...NEED_MORE_INPUT`, or `...STREAM_END`
+
+- pulls bytes from `decoder->source`
+- parses one or more real MP3 frames
+- decodes to PCM into `MP3_DecodeResult.pcm`
+- sets `frameCount`, `bytesConsumed`, and `status`
+- preserves the output format expected by the current audio path
 
 You should keep these output constraints unless you also update the audio path:
+
 - `48000 Hz`
 - stereo
 - 16-bit PCM
-
-### 3) Keep the player bridge
-
-`Src/mp3_player.c` already adapts decoder output into the existing DMA playback path. In the normal case, you should not need to change the app loop in `Src/main.c`.
 
 ## Try it in STM32CubeIDE
 
@@ -80,4 +130,4 @@ You should keep these output constraints unless you also update the audio path:
 3. Flash it to the STM32F407 board.
 4. Plug headphones or powered speakers into the audio jack.
 
-You should hear repeating audio using the current scaffold path. Once a real decoder is dropped in, the same path can play decoded MP3 PCM.
+You should hear repeating audio using the current scaffold path. Once a real decoder is dropped into `Src/mp3_decoder.c`, the same player and DMA transport can be reused for actual MP3 playback.

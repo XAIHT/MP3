@@ -8,9 +8,9 @@
 typedef struct
 {
     MP3_PlayerContext *context;
-    int16_t frameScratch[128u * 2u];
     uint32_t scratchFrames;
     uint32_t scratchIndex;
+    MP3_DecodeResult currentChunk;
 } MP3_PlayerGeneratorState;
 
 static uint8_t g_mp3_fake_wav_header[MP3_PLAYER_FAKE_WAV_HEADER_SIZE];
@@ -63,32 +63,43 @@ static int MP3_Player_Generator(int16_t *out, uint32_t frames, void *user)
     {
         if (state->scratchIndex >= state->scratchFrames)
         {
-            MP3_DecodeResult result;
-            MP3_DecodeStatus status = MP3_Decoder_DecodeFrame(&state->context->decoder, &result);
-            if (status == MP3_DECODER_STATUS_NEED_MORE_INPUT || result.samples == NULL || result.frameCount == 0u)
+            MP3_DecodeStatus status = MP3_Decoder_DecodeFrame(&state->context->decoder, &state->currentChunk);
+            if (status == MP3_DECODER_STATUS_NEED_MORE_INPUT || state->currentChunk.frameCount == 0u)
             {
                 return -2;
             }
-            if (result.sampleRate != MP3_DECODER_OUTPUT_SAMPLE_RATE ||
-                result.channels != MP3_DECODER_OUTPUT_CHANNELS ||
-                result.bitsPerSample != MP3_DECODER_OUTPUT_BITS)
+            if (state->currentChunk.sampleRate != MP3_DECODER_OUTPUT_SAMPLE_RATE ||
+                state->currentChunk.channels != MP3_DECODER_OUTPUT_CHANNELS ||
+                state->currentChunk.bitsPerSample != MP3_DECODER_OUTPUT_BITS)
             {
                 return -3;
             }
 
-            memcpy(state->frameScratch,
-                   result.samples,
-                   result.frameCount * MP3_DECODER_OUTPUT_CHANNELS * sizeof(int16_t));
-            state->scratchFrames = result.frameCount;
+            state->scratchFrames = state->currentChunk.frameCount;
             state->scratchIndex = 0u;
         }
 
-        out[2u * i + 0u] = state->frameScratch[2u * state->scratchIndex + 0u];
-        out[2u * i + 1u] = state->frameScratch[2u * state->scratchIndex + 1u];
+        out[2u * i + 0u] = state->currentChunk.pcm[2u * state->scratchIndex + 0u];
+        out[2u * i + 1u] = state->currentChunk.pcm[2u * state->scratchIndex + 1u];
         state->scratchIndex++;
     }
 
     return 0;
+}
+
+static void MP3_Player_InitCommon(MP3_PlayerContext *context)
+{
+    memset(&g_mp3_generator_state, 0, sizeof(g_mp3_generator_state));
+    MP3_Player_BuildPcmHeader(g_mp3_fake_wav_header,
+                              MP3_PLAYER_FALLBACK_TOTAL_FRAMES * MP3_DECODER_OUTPUT_CHANNELS * 2u);
+    g_mp3_generator_state.context = context;
+
+    context->clip.wavHeader = g_mp3_fake_wav_header;
+    context->clip.wavHeaderSize = sizeof(g_mp3_fake_wav_header);
+    context->clip.totalFrames = MP3_PLAYER_FALLBACK_TOTAL_FRAMES;
+    context->clip.generator = MP3_Player_Generator;
+    context->clip.user = &g_mp3_generator_state;
+    context->active = (context->decoder.initialized != 0u) && (context->decoder.source.read != NULL);
 }
 
 void MP3_Player_InitFromMemory(MP3_PlayerContext *context, const uint8_t *mp3Data, size_t mp3Size)
@@ -101,22 +112,24 @@ void MP3_Player_InitFromMemory(MP3_PlayerContext *context, const uint8_t *mp3Dat
     }
 
     memset(context, 0, sizeof(*context));
-    memset(&g_mp3_generator_state, 0, sizeof(g_mp3_generator_state));
+    MP3_Data_InitMemorySource(&context->memorySource, mp3Data, mp3Size);
+    MP3_Data_BuildMemoryByteSource(&source, &context->memorySource);
+    MP3_Decoder_Init(&context->decoder, &source, NULL);
+    MP3_Player_InitCommon(context);
+}
 
-    MP3_ByteSource_Init(&source, mp3Data, mp3Size);
-    MP3_Decoder_Init(&context->decoder, &source);
+void MP3_Player_InitFromByteSource(MP3_PlayerContext *context,
+                                   const MP3_ByteSource *source,
+                                   const MP3_DecoderConfig *config)
+{
+    if (context == NULL)
+    {
+        return;
+    }
 
-    MP3_Player_BuildPcmHeader(g_mp3_fake_wav_header,
-                              MP3_PLAYER_FALLBACK_TOTAL_FRAMES * MP3_DECODER_OUTPUT_CHANNELS * 2u);
-
-    g_mp3_generator_state.context = context;
-
-    context->clip.wavHeader = g_mp3_fake_wav_header;
-    context->clip.wavHeaderSize = sizeof(g_mp3_fake_wav_header);
-    context->clip.totalFrames = MP3_PLAYER_FALLBACK_TOTAL_FRAMES;
-    context->clip.generator = MP3_Player_Generator;
-    context->clip.user = &g_mp3_generator_state;
-    context->active = 1u;
+    memset(context, 0, sizeof(*context));
+    MP3_Decoder_Init(&context->decoder, source, config);
+    MP3_Player_InitCommon(context);
 }
 
 const WAV_EmbeddedClip *MP3_Player_GetClip(MP3_PlayerContext *context)
@@ -126,10 +139,7 @@ const WAV_EmbeddedClip *MP3_Player_GetClip(MP3_PlayerContext *context)
         return NULL;
     }
 
-    MP3_Decoder_Reset(&context->decoder);
-    g_mp3_generator_state.context = context;
-    g_mp3_generator_state.scratchFrames = 0u;
-    g_mp3_generator_state.scratchIndex = 0u;
+    MP3_Player_Reset(context);
     return &context->clip;
 }
 
@@ -144,7 +154,31 @@ int MP3_Player_StartDMA(MP3_PlayerContext *context)
     return WAV_Player_StartClipDMA(clip);
 }
 
+void MP3_Player_Reset(MP3_PlayerContext *context)
+{
+    if (context == NULL)
+    {
+        return;
+    }
+
+    MP3_Decoder_Reset(&context->decoder);
+    g_mp3_generator_state.context = context;
+    g_mp3_generator_state.scratchFrames = 0u;
+    g_mp3_generator_state.scratchIndex = 0u;
+    memset(&g_mp3_generator_state.currentChunk, 0, sizeof(g_mp3_generator_state.currentChunk));
+}
+
 uint8_t MP3_Player_IsReady(const MP3_PlayerContext *context)
 {
-    return (context != NULL) && (context->active != 0u);
+    return (context != NULL) && (context->active != 0u) && (context->decoder.initialized != 0u);
+}
+
+uint8_t MP3_Player_IsFinished(const MP3_PlayerContext *context)
+{
+    if (context == NULL)
+    {
+        return 1u;
+    }
+
+    return MP3_Decoder_IsFinished(&context->decoder);
 }

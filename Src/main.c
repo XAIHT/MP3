@@ -63,6 +63,21 @@ void SystemClock_Config(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 /* Embedded audio clip is produced in `Src/wav_data.c` and streamed by `wav_player.c`. */
+static void Audio_StartPreferredClip(const WAV_EmbeddedClip *embeddedClip)
+{
+  if ((embeddedClip != NULL) && MP3_Player_IsReady(&g_mp3PlayerContext))
+  {
+    if (MP3_Player_StartDMA(&g_mp3PlayerContext) == 0)
+    {
+      return;
+    }
+  }
+
+  if (embeddedClip != NULL)
+  {
+    (void)WAV_Player_StartClipDMA(embeddedClip);
+  }
+}
 /* USER CODE END 0 */
 
 /**
@@ -109,14 +124,7 @@ int main(void)
                             MP3_Data_GetStubBytes(),
                             MP3_Data_GetStubSize());
 
-  if (MP3_Player_IsReady(&g_mp3PlayerContext))
-  {
-    (void)MP3_Player_StartDMA(&g_mp3PlayerContext);
-  }
-  else
-  {
-    (void)WAV_Player_StartClipDMA(embeddedClip);
-  }
+  Audio_StartPreferredClip(embeddedClip);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -126,14 +134,7 @@ int main(void)
     WAV_Player_Process();
     if (!WAV_Player_IsBusy())
     {
-      if (MP3_Player_IsReady(&g_mp3PlayerContext))
-      {
-        (void)MP3_Player_StartDMA(&g_mp3PlayerContext);
-      }
-      else
-      {
-        (void)WAV_Player_StartClipDMA(WAV_Data_GetEmbeddedClip());
-      }
+      Audio_StartPreferredClip(WAV_Data_GetEmbeddedClip());
     }
     HAL_Delay(1);
   }

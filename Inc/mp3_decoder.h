@@ -11,6 +11,8 @@ extern "C" {
 #define MP3_DECODER_OUTPUT_SAMPLE_RATE 48000u
 #define MP3_DECODER_OUTPUT_CHANNELS    2u
 #define MP3_DECODER_OUTPUT_BITS        16u
+#define MP3_DECODER_MAX_PCM_FRAMES     1152u
+#define MP3_DECODER_MAX_FRAME_BYTES    2048u
 
 typedef enum
 {
@@ -21,16 +23,26 @@ typedef enum
     MP3_DECODER_STATUS_ERROR = -2
 } MP3_DecodeStatus;
 
+typedef size_t (*MP3_ByteSource_ReadFn)(void *context, uint8_t *dst, size_t maxBytes);
+typedef int (*MP3_ByteSource_RewindFn)(void *context);
+
 typedef struct
 {
-    const uint8_t *data;
-    size_t size;
-    size_t offset;
+    MP3_ByteSource_ReadFn read;
+    MP3_ByteSource_RewindFn rewind;
+    void *context;
 } MP3_ByteSource;
 
 typedef struct
 {
-    const int16_t *samples;
+    uint32_t outputSampleRate;
+    uint8_t outputChannels;
+    uint8_t outputBitsPerSample;
+} MP3_DecoderConfig;
+
+typedef struct
+{
+    int16_t pcm[MP3_DECODER_MAX_PCM_FRAMES * MP3_DECODER_OUTPUT_CHANNELS];
     uint32_t frameCount;
     uint32_t sampleRate;
     uint8_t channels;
@@ -42,14 +54,24 @@ typedef struct
 typedef struct
 {
     MP3_ByteSource source;
+    MP3_DecoderConfig config;
+    uint8_t inputCache[MP3_DECODER_MAX_FRAME_BYTES];
+    size_t cachedBytes;
+    size_t streamOffset;
     uint8_t initialized;
     uint8_t streamEnded;
     uint32_t totalFramesProduced;
     uint32_t nextFrameIndex;
 } MP3_Decoder;
 
-void MP3_ByteSource_Init(MP3_ByteSource *source, const uint8_t *data, size_t size);
-void MP3_Decoder_Init(MP3_Decoder *decoder, const MP3_ByteSource *source);
+void MP3_ByteSource_Init(MP3_ByteSource *source,
+                         MP3_ByteSource_ReadFn readFn,
+                         MP3_ByteSource_RewindFn rewindFn,
+                         void *context);
+void MP3_Decoder_GetDefaultConfig(MP3_DecoderConfig *config);
+void MP3_Decoder_Init(MP3_Decoder *decoder,
+                      const MP3_ByteSource *source,
+                      const MP3_DecoderConfig *config);
 void MP3_Decoder_Reset(MP3_Decoder *decoder);
 MP3_DecodeStatus MP3_Decoder_DecodeFrame(MP3_Decoder *decoder, MP3_DecodeResult *result);
 uint8_t MP3_Decoder_IsFinished(const MP3_Decoder *decoder);

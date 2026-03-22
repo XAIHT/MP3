@@ -1,2 +1,6 @@
-../Src/mp3_data.c:16:16:MP3_Data_GetStubBytes	1
-../Src/mp3_data.c:21:8:MP3_Data_GetStubSize	1
+../Src/mp3_data.c:18:6:MP3_Data_InitMemorySource	2
+../Src/mp3_data.c:32:8:MP3_Data_MemoryRead	7
+../Src/mp3_data.c:57:5:MP3_Data_MemoryRewind	2
+../Src/mp3_data.c:69:6:MP3_Data_BuildMemoryByteSource	1
+../Src/mp3_data.c:75:16:MP3_Data_GetStubBytes	1
+../Src/mp3_data.c:80:8:MP3_Data_GetStubSize	1
