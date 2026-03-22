@@ -1,0 +1,2 @@
+../Src/mp3_data.c:16:16:MP3_Data_GetStubBytes	1
+../Src/mp3_data.c:21:8:MP3_Data_GetStubSize	1

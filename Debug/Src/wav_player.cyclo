@@ -1,0 +1,16 @@
+../Src/wav_player.c:28:17:rd_u32le	1
+../Src/wav_player.c:33:17:rd_u16le	1
+../Src/wav_player.c:38:12:WAV_Player_ValidateHeader	15
+../Src/wav_player.c:86:13:WAV_Player_PackPcmToI2S	2
+../Src/wav_player.c:99:12:WAV_Player_FillDmaHalf	9
+../Src/wav_player.c:131:5:WAV_Player_PlayFromMemory	25
+../Src/wav_player.c:240:5:WAV_Player_PlayGenerated	21
+../Src/wav_player.c:335:5:WAV_Player_PlayClip	6
+../Src/wav_player.c:353:5:WAV_Player_StartClipDMA	9
+../Src/wav_player.c:395:6:WAV_Player_Process	4
+../Src/wav_player.c:409:9:WAV_Player_IsBusy	1
+../Src/wav_player.c:414:9:WAV_Player_IsClipDone	1
+../Src/wav_player.c:419:6:WAV_Player_StopDMA	2
+../Src/wav_player.c:430:6:HAL_I2S_TxHalfCpltCallback	4
+../Src/wav_player.c:445:6:HAL_I2S_TxCpltCallback	4
+../Src/wav_player.c:462:6:HAL_I2S_ErrorCallback	2

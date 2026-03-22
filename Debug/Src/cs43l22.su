@@ -1,0 +1,6 @@
+../Src/cs43l22.c:28:6:CS43L22_Init	32	static
+../Src/cs43l22.c:74:6:CS43L22_SetVolume	16	static
+../Src/cs43l22.c:85:6:CS43L22_Beep	8	static
+../Src/cs43l22.c:101:6:CS43L22_Start	8	static
+../Src/cs43l22.c:111:6:CS43L22_Stop	8	static
+../Src/cs43l22.c:119:13:CS43L22_WriteRegister	32	static

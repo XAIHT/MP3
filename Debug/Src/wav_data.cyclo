@@ -1,0 +1,9 @@
+../Src/wav_data.c:19:13:wav_write_u32le	1
+../Src/wav_data.c:27:13:wav_write_u16le	1
+../Src/wav_data.c:33:13:wav_build_header	1
+../Src/wav_data.c:77:16:sin_q15_from_phase	5
+../Src/wav_data.c:92:17:note_frequency_for_frame	2
+../Src/wav_data.c:101:12:Embedded_MP3ish_Generator	9
+../Src/wav_data.c:147:6:WAV_Data_Init	1
+../Src/wav_data.c:158:25:WAV_Data_GetEmbeddedClip	1
+../Src/wav_data.c:164:10:WAV_Data_GetEmbeddedClipDurationMs	1

@@ -1,0 +1,8 @@
+../Src/mp3_player.c:19:13:mp3_write_u32le	1
+../Src/mp3_player.c:27:13:mp3_write_u16le	1
+../Src/mp3_player.c:33:13:MP3_Player_BuildPcmHeader	1
+../Src/mp3_player.c:54:12:MP3_Player_Generator	12
+../Src/mp3_player.c:94:6:MP3_Player_InitFromMemory	2
+../Src/mp3_player.c:122:25:MP3_Player_GetClip	3
+../Src/mp3_player.c:136:5:MP3_Player_StartDMA	2
+../Src/mp3_player.c:147:9:MP3_Player_IsReady	3
