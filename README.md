@@ -1,4 +1,4 @@
-# MP3 project audio proof-of-concept
+# MP3 project audio proof-of-concept for STM32F407G-Discovery Board
 
 This project now plays audio through the onboard **CS43L22** codec and the audio jack using a **DMA-backed PCM output path** plus a stronger **MP3 decoder scaffold**.
 
